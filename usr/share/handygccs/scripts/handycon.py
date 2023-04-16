@@ -183,7 +183,7 @@ def id_system():
         GYRO_I2C_ADDR = 0x68
         GYRO_I2C_BUS = 1
         system_type = "AYA_GEN2"
-    
+
     elif system_id in (
         "AYANEO 2",
         "GEEK",
@@ -306,15 +306,21 @@ def get_config():
             logger.info(f"Created new config: {config_path}")
 
     # Assign config file values
-    button_map = {
-    "button1": EVENT_MAP[config["Button Map"]["button1"]],
-    "button2": EVENT_MAP[config["Button Map"]["button2"]],
-    "button3": EVENT_MAP[config["Button Map"]["button3"]],
-    "button4": EVENT_MAP[config["Button Map"]["button4"]],
-    "button5": EVENT_MAP[config["Button Map"]["button5"]],
-    "button_volumeDown":  EVENT_MAP[config["Button Map"]["button_volumeDown"]],
-    "button_volumeUp":  EVENT_MAP[config["Button Map"]["button_volumeUp"]],
-    }
+    try:
+        button_map = {
+        "button1": EVENT_MAP[config["Button Map"]["button1"]],
+        "button2": EVENT_MAP[config["Button Map"]["button2"]],
+        "button3": EVENT_MAP[config["Button Map"]["button3"]],
+        "button4": EVENT_MAP[config["Button Map"]["button4"]],
+        "button5": EVENT_MAP[config["Button Map"]["button5"]],
+        "button_volumeDown":  EVENT_MAP[config["Button Map"]["button_volumeDown"]],
+        "button_volumeUp":  EVENT_MAP[config["Button Map"]["button_volumeUp"]],
+        }
+    except Exception as err:
+        logger.error("Remove %s." % config_path)
+        os.remove(config_path)
+        sys.exit(-1)
+
     gyro_sensitivity = int(config["Gyro"]["sensitivity"])
 
 def make_controller():
@@ -844,7 +850,7 @@ async def capture_keyboard_events():
 
                             elif active == [] and seed_event in [1, 29, 42] and button_on == 0 and button6 in event_queue:
                                 event_queue.remove(button6)
-                            
+
                             # BUTTON 6 (UNUSED)
                             if active == [24, 29, 34, 125] and button_on == 1 and button6 not in event_queue:
                                 if button2 in event_queue:
@@ -908,21 +914,21 @@ async def capture_controller_events():
                     # Block FF events, or get infinite recursion. Up to you I guess...
                     if event.type in [e.EV_FF, e.EV_UINPUT]:
                         continue
-                     
+
                     # If gyro is enabled, queue all events so the gyro event handler can manage them.
                     if gyro_device is not None and gyro_enabled:
                         adjusted_val = None
 
                         # We only modify RX/RY ABS events.
                         if event.type == e.EV_ABS and event.code == e.ABS_RX:
-                            # Record last_x_val before adjustment. 
-                            # If right stick returns to the original position there is always an event that sets last_x_val back to zero. 
+                            # Record last_x_val before adjustment.
+                            # If right stick returns to the original position there is always an event that sets last_x_val back to zero.
                             last_x_val = event.value
                             angular_velocity_x = float(gyro_device.getRotationX()[0] / 32768.0 * 2000)
                             adjusted_val = max(min(int(angular_velocity_x * gyro_sensitivity) + event.value, JOY_MAX), JOY_MIN)
                         if event.type == e.EV_ABS and event.code == e.ABS_RY:
-                            # Record last_y_val before adjustment. 
-                            # If right stick returns to the original position there is always an event that sets last_y_val back to zero. 
+                            # Record last_y_val before adjustment.
+                            # If right stick returns to the original position there is always an event that sets last_y_val back to zero.
                             last_y_val = event.value
                             angular_velocity_y = float(gyro_device.getRotationY()[0] / 32768.0 * 2000)
                             adjusted_val = max(min(int(angular_velocity_y * gyro_sensitivity) + event.value, JOY_MAX), JOY_MIN)
@@ -1020,7 +1026,7 @@ async def capture_power_events():
 
     global power_device
     global shutdown
-    
+
     while running:
         if power_device:
             try:
@@ -1041,7 +1047,7 @@ async def capture_power_events():
 
                     if active_keys == [125]:
                         await do_rumble(0, 150, 1000, 0)
-            
+
             except Exception as err:
                 logger.error(f"{err} | Error reading events from power device.")
                 power_device = None
@@ -1091,7 +1097,7 @@ async def capture_ff_events():
             except IOError as err:
                 logger.error(f"{err} | Error uploading effect {effect.id}.")
                 upload.retval = -1
-            
+
             ui_device.end_upload(upload)
 
         elif event.code == e.UI_FF_ERASE:
