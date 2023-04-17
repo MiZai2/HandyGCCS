@@ -17,7 +17,7 @@ import subprocess
 import sys
 import warnings
 
-from constants import CONTROLLER_EVENTS, DETECT_DELAY, EVENT_ALT_TAB, EVENT_ESC, EVENT_MODE, EVENT_KILL, EVENT_OSK, EVENT_QAM, EVENT_SCR, FF_DELAY, HIDE_PATH, JOY_MAX, JOY_MIN
+from constants import CONTROLLER_EVENTS, DETECT_DELAY, EVENT_ALT_TAB, EVENT_ESC, EVENT_MODE, EVENT_KILL, EVENT_OSK, EVENT_QAM, EVENT_SCR, FF_DELAY, HIDE_PATH, JOY_MAX, JOY_MIN, EVENT_VOLUMEDOWN, EVENT_VOLUMEUP
 from evdev import InputDevice, InputEvent, UInput, ecodes as e, list_devices, ff
 from pathlib import Path
 from shutil import move
@@ -58,12 +58,11 @@ EVENT_MAP= {
         "OSK": EVENT_OSK,
         "QAM": EVENT_QAM,
         "SCR": EVENT_SCR,
+        "VOLUMEDOWN":EVENT_VOLUMEDOWN,
+        "VOLUMEUP":EVENT_VOLUMEUP,
     }
 
 HIDE_PATH = Path(HIDE_PATH)
-
-CHIMERA_LAUNCHER_PATH='/usr/share/chimera/bin/chimera-web-launcher'
-HAS_CHIMERA_LAUNCHER=os.path.isfile(CHIMERA_LAUNCHER_PATH)
 
 server_address = '/tmp/ryzenadj_socket'
 
@@ -210,7 +209,6 @@ def id_system():
         "ONEXPLAYER mini GA72",
         "ONEXPLAYER mini GT72",
         "ONEXPLAYER GUNDAM GA72",
-        "ONEXPLAYER 2 ARP23",
         ):
         CAPTURE_CONTROLLER = True
         CAPTURE_KEYBOARD = True
@@ -231,6 +229,17 @@ def id_system():
         GYRO_I2C_ADDR = 0x68
         GYRO_I2C_BUS = 1
         system_type = "OXP_GEN2"
+
+    elif system_id in (
+        "ONEXPLAYER 2 ARP23",
+        ):
+        CAPTURE_CONTROLLER = True
+        CAPTURE_KEYBOARD = True
+        CAPTURE_POWER = True
+        BUTTON_DELAY = 0.08
+        GYRO_I2C_ADDR = 0x68
+        GYRO_I2C_BUS = 1
+        system_type = "OXP_GEN3"
 
     ## GPD Devices.
     # Have 2 buttons with 3 modes (left, right, both)
@@ -308,6 +317,8 @@ def get_config():
                 "button3": "ESC",
                 "button4": "OSK",
                 "button5": "MODE",
+                "button_volumeDown" : "VOLUMEDOWN",
+                "button_volumeUp" : "VOLUMEUP",
                 }
         config["Gyro"] = {"sensitivity": "20"}
         with open(config_path, 'w') as config_file:
@@ -315,13 +326,21 @@ def get_config():
             logger.info(f"Created new config: {config_path}")
 
     # Assign config file values
-    button_map = {
-    "button1": EVENT_MAP[config["Button Map"]["button1"]],
-    "button2": EVENT_MAP[config["Button Map"]["button2"]],
-    "button3": EVENT_MAP[config["Button Map"]["button3"]],
-    "button4": EVENT_MAP[config["Button Map"]["button4"]],
-    "button5": EVENT_MAP[config["Button Map"]["button5"]],
-    }
+    try:
+        button_map = {
+        "button1": EVENT_MAP[config["Button Map"]["button1"]],
+        "button2": EVENT_MAP[config["Button Map"]["button2"]],
+        "button3": EVENT_MAP[config["Button Map"]["button3"]],
+        "button4": EVENT_MAP[config["Button Map"]["button4"]],
+        "button5": EVENT_MAP[config["Button Map"]["button5"]],
+        "button_volumeDown":  EVENT_MAP[config["Button Map"]["button_volumeDown"]],
+        "button_volumeUp":  EVENT_MAP[config["Button Map"]["button_volumeUp"]],
+        }
+    except Exception as err:
+        logger.error("Remove %s." % config_path)
+        os.remove(config_path)
+        sys.exit(-1)
+
     gyro_sensitivity = int(config["Gyro"]["sensitivity"])
 
 def make_controller():
@@ -365,6 +384,7 @@ def get_controller():
             'usb-0000:04:00.3-4/input0',
             'usb-0000:73:00.3-4/input0',
             'usb-0000:74:00.3-3/input0',
+            'usb-0000:74:00.3-4/input0',
             'usb-0000:e3:00.3-4/input0',
             'usb-0000:e4:00.3-4/input0',
             )
@@ -490,6 +510,11 @@ def get_gyro():
         logger.error(f"{err} | Gyro device not initialized. Ensure bmi160_i2c and i2c_dev modules are loaded. Skipping gyro device setup.")
         gyro_device = False
 
+def append_event(seed_event, button, value, events: list):
+    for button_event in button:
+        event = InputEvent(seed_event.sec, seed_event.usec, button_event[0], button_event[1], value)
+        events.append(event)
+
 async def do_rumble(button=0, interval=10, length=1000, delay=0):
     global controller_device
 
@@ -532,7 +557,8 @@ async def capture_keyboard_events():
     button4 = button_map["button4"]  # Default OSK
     button5 = button_map["button5"]  # Default MODE
     button6 = ["RyzenAdj Toggle"]
-    button7 = ["Open Chimera"]
+    button_volumeDown = button_map["button_volumeDown"]
+    button_volumeUp = button_map["button_volumeUp"]
     last_button = None
 
     # Capture keyboard events and translate them to mapped events.
@@ -602,17 +628,11 @@ async def capture_keyboard_events():
                                 shutdown = False
 
                         case "AYA_GEN2":
-                            # BUTTON 1 (Default: Screenshot/Launch Chiumera) LC Button
+                            # BUTTON 1 (Default: Screenshot) LC Button
                             if active == [87, 97, 125] and button_on == 1 and button1 not in event_queue and shutdown == False:
-                                if HAS_CHIMERA_LAUNCHER:
-                                    event_queue.append(button7)
-                                else:
-                                    event_queue.append(button1)
+                                event_queue.append(button1)
                             elif active == [] and seed_event.code in [87, 97, 125] and button_on == 0 and button1 in event_queue:
                                 this_button = button1
-                            elif active == [] and seed_event.code in [87, 97, 125] and button_on == 0 and button7 in event_queue:
-                                event_queue.remove(button7)
-                                launch_chimera()
 
                             # BUTTON 2 (Default: QAM) Small button
                             if active in [[40, 133], [32, 125]] and button_on == 1 and button2 not in event_queue:
@@ -648,8 +668,10 @@ async def capture_keyboard_events():
                             # BUTTON 5 (Default: MODE) Big button
                             if active in [[96, 105, 133], [88, 97, 125]] and button_on == 1 and button5 not in event_queue:
                                 event_queue.append(button5)
+                                append_event(seed_event, button5, 1, events)
                             elif active == [] and seed_event.code in [88, 96, 97, 105, 125, 133] and button_on == 0 and button5 in event_queue:
-                                this_button = button5
+                                append_event(seed_event, button5, 0, events)
+                                event_queue.remove(button5)
 
                             # BUTTON 6 (Default: Toggle RyzenAdj) Big button + Small Button
                             if active == [32, 88, 97, 125] and button_on == 1 and button6 not in event_queue:
@@ -666,28 +688,23 @@ async def capture_keyboard_events():
                             # This device class uses the same active events with different values for AYA SPACE, LC, and RC.
                             if active == [97, 125]:
 
-                                # LC | Default: Screenshot / Launch Chimera
+                                # LC | Default: Screenshot
                                 if button_on == 102 and event_queue == []:
-                                    if HAS_CHIMERA_LAUNCHER:
-                                        event_queue.append(button7)
-                                    else:
-                                        event_queue.append(button1)
+                                    event_queue.append(button1)
+                                    this_button = button1
                                 # RC | Default: OSK
                                 elif button_on == 103 and event_queue == []:
                                     event_queue.append(button4)
+                                    this_button = button4
                                 # AYA Space | Default: MODE
                                 elif button_on == 104 and event_queue == []:
+                                    append_event(seed_event, button5, 1, events)
                                     event_queue.append(button5)
-                            elif active == [] and seed_event.code in [97, 125] and button_on == 0 and event_queue != []:
-                                if button7 in event_queue:
-                                    event_queue.remove(button7)
-                                    launch_chimera()
-                                if button1 in event_queue:
-                                    this_button = button1
-                                if button4 in event_queue:
-                                    this_button = button4
+
+                            elif active == [] and seed_event.code in [97, 125] and button_on == 0:
                                 if button5 in event_queue:
-                                    this_button = button5
+                                    append_event(seed_event, button5, 0, events)
+                                    event_queue.remove(button5)
 
                             # Small button | Default: QAM
                             if active == [32, 125] and button_on == 1 and button2 not in event_queue:
@@ -754,6 +771,26 @@ async def capture_keyboard_events():
                             # Handle L_META from power button
                             elif active == [] and seed_event.code == 125 and button_on == 0 and  event_queue == [] and shutdown == True:
                                 shutdown = False
+
+                        case "OXP_GEN3":
+                            #print(active, seed_event)
+
+                            # BUTTON 2 (Default: turbo)
+                            #if active == [29, 56, 125] and button_on == 1 and button2 not in event_queue:
+                            #    event_queue.append(button2)
+                            #    append_event(seed_event, button2, 1, events)
+                            #elif active == [] and button_on in [29, 56, 125] and button2 in event_queue:
+                            #    append_event(seed_event, button2, 0, events)
+                            #    event_queue.remove(button2)
+
+                            if active == [32, 125] and button_on == 1 and event_queue == []:
+                                event_queue.append(button_volumeDown)
+                                this_button = button_volumeDown
+
+                            if active == [24, 29, 125] and button_on == 1 and event_queue == []:
+                                event_queue.append(button_volumeUp)
+                                this_button = button_volumeUp
+                                #os.system("lsusb -v")
 
                         case "GPD_GEN1":
                             # BUTTON 1 (Default: Screenshot)
@@ -901,7 +938,7 @@ async def capture_keyboard_events():
                             elif active == [] and seed_event.code in [24, 29, 34, 125] and button_on == 0 and button6 in event_queue:
                                 event_queue.remove(button6)
                                 await do_rumble(0, 75, 1000, 0)
-                                await(FF_DELAY * 2)
+                                await asyncio.sleep(FF_DELAY * 2)
                                 await do_rumble(0, 75, 1000, 0)
 
                     # Create list of events to fire.
@@ -1210,11 +1247,6 @@ async def ryzenadj_control(loop):
                 await asyncio.sleep(RYZENADJ_DELAY)
                 continue
         await asyncio.sleep(RYZENADJ_DELAY)
-
-def launch_chimera():
-    if not HAS_CHIMERA_LAUNCHER:
-        return
-    subprocess.run([ "su", USER, "-c", CHIMERA_LAUNCHER_PATH ])
 
 # Gracefull shutdown.
 async def restore_all(loop):
